@@ -1,10 +1,7 @@
-import os, json
-from datetime import datetime, timezone
-import xml.etree.ElementTree as ET
+import os, json, zipfile, io, requests, subprocess
 from .models import BaseClientModel
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional, List
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 class ModLoaderInstaller(BaseClientModel):
@@ -19,6 +16,9 @@ class ModLoaderInstaller(BaseClientModel):
         super(ModLoaderInstaller, self).__init__(
             self._headers, api_base_url, max_workers
         )
+        self._minecraft_manifest = requests.request(
+            "GET", "https://launchermeta.mojang.com/mc/game/version_manifest.json"
+        ).json()
 
     def _get_minecraft_dir_path() -> str:
         home_path = Path.home()
@@ -157,110 +157,98 @@ class NeoForgeInstaller(ModLoaderInstaller):
     ) -> None:
         super(NeoForgeInstaller, self).__init__(api_base_url, max_workers)
 
-    def _parse_pom(self, pom_content: str) -> Tuple[List[Dict[str, str]], str]:
-        root = ET.fromstring(pom_content)
-        namespace = {"m": "http://maven.apache.org/POM/4.0.0"}
-        libraries = []
-        dependencies = root.findall(".//m:dependency", namespace)
-
-        for dep in dependencies:
-            group_id_elem = dep.find("m:groupId", namespace)
-            artifact_id_elem = dep.find("m:artifactId", namespace)
-            version_elem = dep.find("m:version", namespace)
-
-            if (
-                group_id_elem is None
-                or artifact_id_elem is None
-                or version_elem is None
-            ):
-                continue
-
-            group_path = group_id_elem.text.replace(".", "/")
-            file_name = (
-                f"{artifact_id_elem.text}-{version_elem.text}.jar"
-                if artifact_id_elem.text != "neoform"
-                else f"{artifact_id_elem.text}-{version_elem.text}.zip"
-            )
-            maven_path = (
-                f"{group_path}/{artifact_id_elem.text}/{version_elem.text}/{file_name}"
-            )
-            if artifact_id_elem.text == "neoform":
-                neoform_version = version_elem.text
-            url = f"{self._base_url}/releases/{maven_path}"
-            lib_entry = {
-                "name": ":".join(
-                    [group_id_elem.text, artifact_id_elem.text, version_elem.text]
-                ),
-                "downloads": {
-                    "artifact": {
-                        "path": maven_path,
-                        "url": url,
-                    }
-                },
-            }
-            libraries.append(lib_entry)
-
-        with ThreadPoolExecutor(self._max_workers) as executor:
-            future_to_lib = {}
-            for lib in libraries:
-                path = lib["downloads"]["artifact"]["path"]
-                future = executor.submit(self._fetch_file_sha1, path)
-                future_to_lib[future] = lib
-
-            for future in as_completed(future_to_lib):
-                lib = future_to_lib[future]
-                try:
-                    sha1 = future.result()
-                    if sha1:
-                        lib["downloads"]["artifact"]["sha1"] = sha1
-                except Exception:
-                    pass
-
-        return libraries, neoform_version
-
-    def _fetch_file_sha1(self, maven_path: str) -> Tuple[Optional[str]]:
-        response = self.get(endpoint=(f"/{maven_path}.sha1"))
-        value = response.text.strip()
-        return value if value else None
-
     def _generate_version_file(
         self,
         minecraft_version: str,
         loader_version: str,
         version_name: str,
-    ) -> Dict[str, Any]:
+    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         response = self.get(
-            f"/releases/net/neoforged/neoforge/{loader_version}/neoforge-{loader_version}.pom"
+            f"/releases/net/neoforged/neoforge/{loader_version}/neoforge-{loader_version}-installer.jar"
         )
-        libraries, neoform_version = self._parse_pom(response.text)
-        arguments = {
-            "game": [
-                "--fml.neoForgeVersion",
-                loader_version,
-                "--fml.mcVersion",
-                minecraft_version,
-                "--fml.neoFormVersion",
-                neoform_version,
-            ],
-            "jvm": [
-                "-Djava.net.preferIPv6Addresses=system",
-                "-DlibraryDirectory=${library_directory}",
-                "--add-opens",
-                "java.base/java.lang.invoke=ALL-UNNAMED",
-                "--add-exports",
-                "jdk.naming.dns/com.sun.jndi.dns=java.naming",
-            ],
-        }
-        return {
-            "id": version_name,
-            "time": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-            "releaseTime": "2077-01-01T00:00:00.012345Z",
-            "type": "release",
-            "mainClass": "net.neoforged.fml.startup.Client",
-            "inheritsFrom": minecraft_version,
-            "arguments": arguments,
-            "libraries": libraries,
-        }
+        try:
+            with zipfile.ZipFile(io.BytesIO(response.content), "r") as zip_ref:
+                version_filename = "version.json"
+                profile_filename = "install_profile.json"
+
+                with zip_ref.open(profile_filename) as profile_file:
+                    profile_data = json.load(profile_file)
+                with zip_ref.open(version_filename) as version_file:
+                    version_data = json.load(version_file)
+                bin_path_filename = "/".join(
+                    profile_data["data"]["BINPATCH"]["client"].split("/")[1:]
+                )
+                with zip_ref.open(bin_path_filename) as bin_path_file:
+                    bin_path = bin_path_file.read()
+        except Exception as e:
+            raise RuntimeError(f"解析 NeoForge installer 失败: {e}")
+        version_data["id"] = version_name
+        version_data["inheritsFrom"] = minecraft_version
+        return (version_data, profile_data["libraries"], profile_data["data"], bin_path)
+
+    def _resolve_maven_coord(self, coord: str) -> str:
+        parts = coord.replace("[", "").replace("]", "").split(":")
+        if len(parts) < 3:
+            raise ValueError(f"Invalid maven coord: {coord}")
+        group = parts[0]
+        artifact = parts[1]
+        version = parts[2]
+        classifier = parts[3] if len(parts) > 3 else None
+        extension = "jar"
+
+        if classifier and "@" in classifier:
+            classifier, extension = classifier.split("@")
+
+        group_path = group.replace(".", "/")
+        filename = f"{artifact}-{version}"
+        if classifier:
+            filename += f"-{classifier}"
+        filename += f".{extension}"
+
+        return f"{group_path}/{artifact}/{version}/{filename}"
+
+    def _process(
+        self,
+        installer_tool_path: str,
+        minecraft_jar_path: str,
+        mojang_maping_path: str,
+        patched_path: str,
+        libraries_path: str,
+        neoform_mapping_path: str,
+        bin_path: bytes,
+    ) -> bool:
+        if os.path.exists(patched_path) is not None:
+            os.remove(patched_path)
+        with open(".temp.lzma", "wb") as file:
+            file.write(bin_path)
+        command = [
+            "java",
+            "-jar",
+            installer_tool_path,
+            "--task",
+            "PROCESS_MINECRAFT_JAR",
+            "--input",
+            minecraft_jar_path,
+            "--input-mappings",
+            mojang_maping_path,
+            "--output",
+            patched_path,
+            "--extract-libraries-to",
+            libraries_path,
+            "--neoform-data",
+            neoform_mapping_path,
+            "--apply-patches",
+            ".temp.lzma",
+        ]
+        try:
+            subprocess.run(
+                command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            )
+        except Exception as e:
+            print(f"Fail to patch {minecraft_jar_path}: {e}")
+            return False
+        os.remove(".temp.lzma")
+        return True
 
     def install(
         self,
@@ -269,9 +257,9 @@ class NeoForgeInstaller(ModLoaderInstaller):
         minecraft_dir_path=None,
         version_name=None,
         download_block_size=8192,
-    ):
+    ) -> bool:
         if version_name is None:
-            version_name = f"neoforge-{minecraft_version}-{loader_version}"
+            version_name = f"neoforge-{loader_version}"
         if minecraft_dir_path is None:
             minecraft_dir_path = self._get_minecraft_dir_path()
         libraries_path = os.path.join(minecraft_dir_path, "libraries")
@@ -279,21 +267,34 @@ class NeoForgeInstaller(ModLoaderInstaller):
         profile_path = os.path.join(versions_path, version_name)
         profile_json_file = os.path.join(profile_path, f"{version_name}.json")
 
-        profile_data = self._generate_version_file(
+        version_profile, libraries, satic_data, bin_patch = self._generate_version_file(
             minecraft_version, loader_version, version_name
         )
-        libraries = profile_data["libraries"]
         grouped_tasks: Dict[str, List[str]] = {}
-        downloaded_files_map = []
 
         for lib in libraries:
             sha1_value = lib["downloads"]["artifact"]["sha1"]
             folder_prefix = str(Path(lib["downloads"]["artifact"]["path"]).parent)
-            file_name = Path(lib["downloads"]["artifact"]["path"]).name
+            file_name = str(Path(lib["downloads"]["artifact"]["path"]).name)
             task = (file_name, lib["downloads"]["artifact"]["url"], sha1_value, "sha1")
             grouped_tasks.setdefault(folder_prefix, []).append(task)
-            local_file_path = os.path.join(libraries_path, folder_prefix, file_name)
-            downloaded_files_map.append({"local_path": local_file_path, "lib_ref": lib})
+
+        maven_path = self._resolve_maven_coord(satic_data["MOJMAPS"]["client"])
+        folder_prefix = str(Path(maven_path).parent)
+        file_name = str(Path(maven_path).name)
+        target_version = None
+        for version_info in self._minecraft_manifest["versions"]:
+            if version_info["id"] == minecraft_version:
+                target_version = version_info
+                break
+        version_data = requests.request("GET", target_version["url"]).json()
+        task = (
+            file_name,
+            version_data["downloads"]["client_mappings"]["url"],
+            version_data["downloads"]["client_mappings"]["sha1"],
+            "sha1",
+        )
+        grouped_tasks.setdefault(folder_prefix, []).append(task)
 
         deps_res = []
         for prefix, tasks in grouped_tasks.items():
@@ -302,16 +303,51 @@ class NeoForgeInstaller(ModLoaderInstaller):
         if not all(deps_res):
             return False
 
-        for item in downloaded_files_map:
-            local_path = item["local_path"]
-            lib_ref = item["lib_ref"]
-            file_size = os.path.getsize(local_path)
-            lib_ref["downloads"]["artifact"]["size"] = file_size
+        if not os.path.exists(
+            Path(versions_path, minecraft_version, f"{minecraft_version}.jar")
+        ):
+            self.single_download(
+                version_data["downloads"]["client"]["url"],
+                f"{minecraft_version}.jar",
+                Path(versions_path, minecraft_version),
+                download_block_size,
+                version_data["downloads"]["client"]["sha1"],
+                "sha1",
+            )
+
+        install_tool_coord = None
+        for lib in libraries:
+            if "net.neoforged.installertools:installertools" in lib.get("name"):
+                install_tool_coord = lib.get("name")
+                break
+
+        pro_res = self._process(
+            Path(
+                libraries_path,
+                self._resolve_maven_coord(install_tool_coord),
+            ),
+            Path(versions_path, minecraft_version, f"{minecraft_version}.jar"),
+            Path(libraries_path, maven_path),
+            Path(
+                libraries_path,
+                self._resolve_maven_coord(satic_data["PATCHED"]["client"]),
+            ),
+            libraries_path,
+            Path(
+                libraries_path,
+                self._resolve_maven_coord(
+                    f"net.neoforged:neoform:{satic_data["MCP_VERSION"]["client"]}:mappings@tsrg.lzma"
+                ),
+            ),
+            bin_patch,
+        )
+        if pro_res is not True:
+            return False
 
         try:
             os.makedirs(profile_path, exist_ok=True)
             with open(profile_json_file, "w", encoding="utf-8") as file:
-                json.dump(profile_data, file, indent=2, ensure_ascii=False)
+                json.dump(version_profile, file, indent=2, ensure_ascii=False)
         except Exception as e:
             print(f"写入配置文件失败: {e}")
             return False

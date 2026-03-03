@@ -18,9 +18,11 @@ cli = CurseforgeClient(
 #     print(loader.name, loader.game_version)
 
 loader = NeoForgeInstaller()
-content = loader.install("1.21.10", "21.10.9-beta", ".minecraft")
-with open("version.json", "w") as file:
-    file.write(json.dumps(content, indent=2))
+loader.install("1.21.11", "21.11.38-beta", ".minecraft/")
+# /mnt/c/Users/Pengy/AppData/Roaming/.minecraft/
+# content = loader._generate_version_file("1.21.11", "21.11.38-beta", "neoforge")
+# with open("version.json" ,"w") as file:
+#     file.write(json.dumps(content, indent=2))
 
 # mod = cli.get_mod(925200)
 # cli.download_modpacks(925200, mode="complete")
