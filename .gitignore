@@ -12,3 +12,4 @@ wheels/
 # DeBugging files
 *.log
 *.json
+.minecraft/*

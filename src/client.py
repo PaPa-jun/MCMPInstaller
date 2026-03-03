@@ -50,7 +50,7 @@ class CurseforgeClient(BaseClientModel):
         self, class_id: Optional[int] = None, class_only: Optional[bool] = None
     ) -> List[Category]:
         params = {"gameId": self._game_id, "classId": class_id, "classOnly": class_only}
-        response = self.get(endpoint="/v1/categories", params=params)
+        response = self.get(endpoint="/v1/categories", params=params).json()
         return [Category.from_dict(category) for category in response["data"]]
 
     def search(
@@ -106,7 +106,7 @@ class CurseforgeClient(BaseClientModel):
             else:
                 raise ValueError("mod_loader_type must be an int or a list of ints")
 
-        response = self.get(endpoint="/v1/mods/search", params=params)
+        response = self.get(endpoint="/v1/mods/search", params=params).json()
         return SearchResult.from_dict(response)
 
     def search_mods(
@@ -398,14 +398,14 @@ class CurseforgeClient(BaseClientModel):
         return self.search(**search_params)
 
     def get_mod(self, mod_id: int) -> Mod:
-        response = self.get(endpoint=f"/v1/mods/{mod_id}")
+        response = self.get(endpoint=f"/v1/mods/{mod_id}").json()
         return Mod.from_dict(response["data"])
 
     def get_mods(
         self, mod_ids: List[int], filter_pc_only: Optional[bool] = True
     ) -> List[Mod]:
         json = {"modIds": mod_ids, "filterPcOnly": filter_pc_only}
-        response = self.post(endpoint="/v1/mods", json=json)
+        response = self.post(endpoint="/v1/mods", json=json).json()
         return [Mod.from_dict(mod) for mod in response["data"]]
 
     def get_featured_mods(
@@ -418,7 +418,7 @@ class CurseforgeClient(BaseClientModel):
             "excludedModIds": excluded_mod_ids,
             "gameVersionTypeId": game_version_type_id,
         }
-        response = self.post(endpoint="/v1/mods/featured", json=json)
+        response = self.post(endpoint="/v1/mods/featured", json=json).json()
         return {
             "featured": [Mod.from_dict(mod) for mod in response["data"]["featured"]],
             "popular": [Mod.from_dict(mod) for mod in response["data"]["popular"]],
@@ -435,11 +435,13 @@ class CurseforgeClient(BaseClientModel):
         markup: Optional[bool] = None,
     ) -> str:
         params = {"raw": raw, "stripped": stripped, "markup": markup}
-        response = self.get(endpoint=f"/v1/mods/{mod_id}/description", params=params)
+        response = self.get(
+            endpoint=f"/v1/mods/{mod_id}/description", params=params
+        ).json()
         return response["data"]
 
     def get_mod_file(self, mod_id: int, file_id: int) -> File:
-        respones = self.get(endpoint=f"/v1/mods/{mod_id}/files/{file_id}")
+        respones = self.get(endpoint=f"/v1/mods/{mod_id}/files/{file_id}").json()
         return File.from_dict(respones["data"])
 
     def get_mod_files(
@@ -458,20 +460,24 @@ class CurseforgeClient(BaseClientModel):
             "index": index,
             "pageSize": page_size,
         }
-        response = self.get(endpoint=f"/v1/mods/{mod_id}/files", params=params)
+        response = self.get(endpoint=f"/v1/mods/{mod_id}/files", params=params).json()
         return [File.from_dict(file) for file in response["data"]]
 
     def get_files(self, file_ids: List[int]) -> List[File]:
         json = {"fileIds": file_ids}
-        response = self.post(endpoint="/v1/mods/files", json=json)
+        response = self.post(endpoint="/v1/mods/files", json=json).json()
         return [File.from_dict(file) for file in response["data"]]
 
     def get_mod_file_changelog(self, mod_id: int, file_id: int) -> str:
-        response = self.get(endpoint=f"/v1/mods/{mod_id}/files/{file_id}/changelog")
+        response = self.get(
+            endpoint=f"/v1/mods/{mod_id}/files/{file_id}/changelog"
+        ).json()
         return response["data"]
 
     def get_mod_file_download_url(self, mod_id: int, file_id: int) -> str:
-        response = self.get(endpoint=f"/v1/mods/{mod_id}/files/{file_id}/download-url")
+        response = self.get(
+            endpoint=f"/v1/mods/{mod_id}/files/{file_id}/download-url"
+        ).json()
         if response["data"] is not None:
             return response["data"]
         else:
@@ -482,24 +488,28 @@ class CurseforgeClient(BaseClientModel):
         self, sort_descending: Optional[bool] = None
     ) -> List[MinecraftVersion]:
         params = {"sortDescending": sort_descending}
-        response = self.get(endpoint="/v1/minecraft/version", params=params)
+        response = self.get(endpoint="/v1/minecraft/version", params=params).json()
         return [MinecraftVersion.from_dict(data) for data in response["data"]]
 
     def get_specific_minecraft_version(
         self, game_version_string: str
     ) -> MinecraftVersion:
-        response = self.get(endpoint=f"/v1/minecraft/version/{game_version_string}")
+        response = self.get(
+            endpoint=f"/v1/minecraft/version/{game_version_string}"
+        ).json()
         return MinecraftVersion.from_dict(response["data"])
 
     def get_minecraft_loaders(
         self, game_version: Optional[str] = None, include_all: Optional[bool] = None
     ) -> List[ModLoader]:
         params = {"version": game_version, "includeAll": include_all}
-        response = self.get(endpoint="/v1/minecraft/modloader", params=params)
+        response = self.get(endpoint="/v1/minecraft/modloader", params=params).json()
         return [ModLoader.from_dict(data) for data in response["data"]]
 
     def get_specific_minecraft_loader(self, mod_loader_name: str) -> MinecraftModLoader:
-        response = self.get(endpoint=f"/v1/minecraft/modloader/{mod_loader_name}")
+        response = self.get(
+            endpoint=f"/v1/minecraft/modloader/{mod_loader_name}"
+        ).json()
         return MinecraftModLoader.from_dict(response["data"])
 
     def download_mod_file(

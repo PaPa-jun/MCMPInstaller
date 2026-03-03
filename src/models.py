@@ -24,7 +24,7 @@ class BaseClientModel:
                 method=method, url=url, headers=self._headers, params=params, json=json
             )
             response.raise_for_status()
-            return response.json()
+            return response
         except requests.exceptions.HTTPError as e:
             print(f"HTTP 请求错误: {e}")
             return None
