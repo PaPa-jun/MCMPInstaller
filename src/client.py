@@ -34,6 +34,7 @@ class CurseforgeClient(BaseClientModel):
     ) -> None:
         self._headers = {"Accept": "application/json", "x-api-key": api_key}
         super(CurseforgeClient, self).__init__(headers=self._headers, base_url=base_url)
+        
         self._game_id = game_id
         self._mods_class_id = mods_class_id
         self._modpacks_class_id = modpacks_class_id
@@ -44,6 +45,7 @@ class CurseforgeClient(BaseClientModel):
         self._resource_packs_class_id = resource_packs_class_id
         self._customization_class_id = customization_class_id
         self._data_packs_class_id = data_packs_class_id
+
         self._hash_algo = {1: "sha1", 2: "md5"}
 
     def get_categories(
