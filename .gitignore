@@ -13,3 +13,4 @@ wheels/
 *.log
 *.json
 .minecraft/*
+temp/*

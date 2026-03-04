@@ -18,10 +18,13 @@ class BaseClientModel:
         params: Optional[Dict[str, Any]] = None,
         json: Optional[Dict[str, Any]] = None,
     ) -> Any:
-        url = self._base_url + endpoint
         try:
             response = requests.request(
-                method=method, url=url, headers=self._headers, params=params, json=json
+                method=method,
+                url=endpoint,
+                headers=self._headers,
+                params=params,
+                json=json,
             )
             response.raise_for_status()
             return response
@@ -33,10 +36,12 @@ class BaseClientModel:
             return None
 
     def get(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Any:
-        return self._request("GET", endpoint, params=params)
+        url = self._base_url + endpoint
+        return self._request("GET", url, params=params)
 
     def post(self, endpoint: str, json: Optional[Dict[str, Any]] = None) -> Any:
-        return self._request("POST", endpoint, json=json)
+        url = self._base_url + endpoint
+        return self._request("POST", url, json=json)
 
     def _calculate_file_hash(self, file_path: str, hash_algo: str):
         try:
