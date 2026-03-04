@@ -1,5 +1,5 @@
-import zipfile
-import os
+import zipfile, os
+from pathlib import Path
 from typing import Optional
 
 
@@ -16,7 +16,6 @@ def unzip_file(
 
 
 def get_main_class(jar_path: str):
-    manifest_content = None
     with zipfile.ZipFile(jar_path, "r") as zip_ref:
         for file_name in zip_ref.namelist():
             if file_name == "META-INF/MANIFEST.MF":
@@ -54,4 +53,4 @@ def resolve_maven_coord(coord: str) -> str:
     if classifier:
         filename += f"-{classifier}"
     filename += f".{extension}"
-    return f"{group_path}/{artifact}/{version}/{filename}"
+    return Path(group_path, artifact, version, filename)

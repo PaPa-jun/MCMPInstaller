@@ -2,24 +2,69 @@ import json
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional, List
 
-from .models import Installer
+from .models import BaseInstaller
+from .utils import resolve_maven_coord
 
 
-class ForgeInstaller(Installer):
+class ForgeInstaller(BaseInstaller):
     def __init__(
-        self,
-        api_base_url: str = "https://meta.fabricmc.net",
-        max_workers: int = 5,
+        self, maven_base_url="https://maven.minecraftforge.net", max_workers=5
     ) -> None:
-        super(FabricInstaller, self).__init__(api_base_url, max_workers)
+        super(ForgeInstaller, self).__init__(maven_base_url, max_workers)
+
+    def install(
+        self,
+        minecraft_version,
+        loader_version,
+        minecraft_dir_path=None,
+        download_block_size=8192,
+        install_side="client",
+    ) -> bool:
+        self._install_initialize(
+            install_side,
+            minecraft_version,
+            "forge",
+            loader_version,
+            minecraft_dir_path,
+        )
+        self._get_installer(
+            f"/net/minecraftforge/forge/{minecraft_version}-{loader_version}/forge-{minecraft_version}-{loader_version}-installer.jar"
+        )
+        install_profile = json.loads(self.installer["install_profile.json"])
+        version_profile = json.loads(self.installer["version.json"])
+
+        grouped_tasks: Dict[str, List[str]] = {}
+        for lib in install_profile["libraries"]:
+            sha1_value = lib["downloads"]["artifact"]["sha1"]
+            folder_prefix = str(Path(lib["downloads"]["artifact"]["path"]).parent)
+            file_name = str(Path(lib["downloads"]["artifact"]["path"]).name)
+            download_url = (
+                lib["downloads"]["artifact"]["url"]
+                if lib["downloads"]["artifact"]["url"]
+                and lib["downloads"]["artifact"]["url"] != ""
+                else f"{self._base_url}/{resolve_maven_coord(lib["name"])}"
+            )
+            task = (file_name, download_url, sha1_value, "sha1")
+            grouped_tasks.setdefault(folder_prefix, []).append(task)
+
+        deps_res = []
+        for prefix, tasks in grouped_tasks.items():
+            path = Path(self._static_data["ROOT"], "libraries", prefix)
+            deps_res.extend(self.batch_download(tasks, path, download_block_size))
+        if not all(deps_res):
+            return False
+
+        self.check_and_download_minecraft_jar(download_block_size)
+        processors = self._parse_install_profile(install_profile)
+        pro_res = self._run_processors(processors)
+        if not all(pro_res):
+            return False
+
+        return self._write_version_file(version_profile)
 
 
-class FabricInstaller(Installer):
-    def __init__(
-        self,
-        api_base_url: str = "https://meta.fabricmc.net",
-        max_workers: int = 5,
-    ) -> None:
+class FabricInstaller(BaseInstaller):
+    def __init__(self, api_base_url="https://meta.fabricmc.net", max_workers=5) -> None:
         super(FabricInstaller, self).__init__(api_base_url, max_workers)
 
     def _get_lib_hash(self, data: Dict[str, Any]) -> Optional[Tuple[str, str]]:
@@ -36,11 +81,11 @@ class FabricInstaller(Installer):
 
     def install(
         self,
-        minecraft_version: str,
-        loader_version: str,
-        minecraft_dir_path: Optional[str] = None,
-        download_block_size: int = 8192,
-        install_side: str = "client",
+        minecraft_version,
+        loader_version,
+        minecraft_dir_path=None,
+        download_block_size=8192,
+        install_side="client",
     ):
         self._install_initialize(
             install_side,
@@ -78,9 +123,9 @@ class FabricInstaller(Installer):
         return self._write_version_file(version_profile)
 
 
-class NeoForgeInstaller(Installer):
+class NeoForgeInstaller(BaseInstaller):
     def __init__(
-        self, maven_base_url: str = "https://maven.neoforged.net", max_workers=5
+        self, maven_base_url="https://maven.neoforged.net", max_workers=5
     ) -> None:
         super(NeoForgeInstaller, self).__init__(maven_base_url, max_workers)
 
@@ -99,9 +144,8 @@ class NeoForgeInstaller(Installer):
             loader_version,
             minecraft_dir_path,
         )
-        self.check_and_download_minecraft_jar(download_block_size)
         self._get_installer(
-            f"{self._base_url}/releases/net/neoforged/neoforge/{loader_version}/neoforge-{loader_version}-installer.jar"
+            f"/releases/net/neoforged/neoforge/{loader_version}/neoforge-{loader_version}-installer.jar"
         )
 
         install_profile = json.loads(self.installer["install_profile.json"])
@@ -122,9 +166,33 @@ class NeoForgeInstaller(Installer):
         if not all(deps_res):
             return False
 
+        self.check_and_download_minecraft_jar(download_block_size)
         processors = self._parse_install_profile(install_profile)
         pro_res = self._run_processors(processors)
         if not all(pro_res):
             return False
 
         return self._write_version_file(version_profile)
+
+
+class QuiltInstaller(BaseInstaller):
+    def __init__(
+        self, maven_base_url="https://maven.quiltmc.org", max_workers=5
+    ) -> None:
+        super(QuiltInstaller, self).__init__(maven_base_url, max_workers)
+
+    def install(
+        self,
+        minecraft_version,
+        loader_version,
+        minecraft_dir_path=None,
+        download_block_size=8192,
+        install_side="client",
+    ):
+        return super().install(
+            minecraft_version,
+            loader_version,
+            minecraft_dir_path,
+            download_block_size,
+            install_side,
+        )

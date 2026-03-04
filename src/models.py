@@ -46,24 +46,17 @@ class BaseClientModel:
         return self._request("POST", url, json=json)
 
     def _calculate_file_hash(self, file_path: str, hash_algo: str):
-        try:
-            hash_func = hashlib.new(hash_algo)
-            with open(file_path, "rb") as f:
-                for chunk in iter(lambda: f.read(8192), b""):
-                    hash_func.update(chunk)
-            return hash_func.hexdigest()
-        except Exception as e:
-            print(f"计算文件哈希值失败 {file_path}: {e}")
-            return None
+        hash_func = hashlib.new(hash_algo)
+        with open(file_path, "rb") as f:
+            for chunk in iter(lambda: f.read(8192), b""):
+                hash_func.update(chunk)
+        return hash_func.hexdigest()
 
     def _hash_verify(self, file_path: str, expected_hash: str, hash_algo: str):
         expected_hash = expected_hash.lower().strip()
         file_hash = self._calculate_file_hash(file_path, hash_algo)
         if file_hash == expected_hash:
             return True
-        print(f"文件校验失败：{file_path}")
-        if os.path.exists(file_path):
-            os.remove(file_path)
         return False
 
     def single_download(
@@ -83,9 +76,11 @@ class BaseClientModel:
 
         if os.path.exists(full_path):
             if expected_hash:
-                return self._hash_verify(full_path, expected_hash, hash_algo)
+                if self._hash_verify(full_path, expected_hash, hash_algo):
+                    return True
+                os.remove(full_path)
             else:
-                return True
+                os.remove(full_path)
 
         try:
             with requests.get(url=url, stream=True, headers=self._headers) as request:
@@ -101,10 +96,12 @@ class BaseClientModel:
                                 f.write(chunk)
                                 pbar.update(len(chunk))
             if expected_hash is not None:
-                return self._hash_verify(full_path, expected_hash, hash_algo)
+                if not self._hash_verify(full_path, expected_hash, hash_algo):
+                    os.remove(full_path)
+                    return False
             return True
         except Exception as e:
-            print(f"下载失败 {file_name}: {e}")
+            print(f"Download failed: {file_name}: {e}")
             if os.path.exists(full_path):
                 os.remove(full_path)
             return False
@@ -142,7 +139,7 @@ class BaseClientModel:
         return [results[item[0]] for item in files if item[0] in results]
 
 
-class Installer(BaseClientModel):
+class BaseInstaller(BaseClientModel):
     def __init__(
         self,
         api_base_url: str,
@@ -151,15 +148,11 @@ class Installer(BaseClientModel):
         self._headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.3 Safari/605.1.15"
         }
-        super(Installer, self).__init__(self._headers, api_base_url, max_workers)
+        super(BaseInstaller, self).__init__(self._headers, api_base_url, max_workers)
 
         self.installer = {}
         self._static_data = {}
         self._pattern = re.compile(r"(\{[A-Z_]+\})|(\[[^\]]+\])")
-
-        self._minecraft_manifest = requests.request(
-            "GET", "https://launchermeta.mojang.com/mc/game/version_manifest.json"
-        ).json()
 
     def _get_minecraft_dir_path(self) -> str:
         home_path = Path.home()
@@ -168,23 +161,23 @@ class Installer(BaseClientModel):
             minecraft_dir_path = (
                 Path(appdata, ".minecraft")
                 if appdata
-                else Path(str(home_path), ".minecraft")
+                else Path(home_path, ".minecraft")
             )
         elif os.name == "posix":
             if os.path.exists(
-                Path(str(home_path), "Library", "Application Support", "minecraft")
+                Path(home_path, "Library", "Application Support", "minecraft")
             ):
                 minecraft_dir_path = Path(
-                    str(home_path), "Library", "Application Support", "minecraft"
+                    home_path, "Library", "Application Support", "minecraft"
                 )
             else:
-                minecraft_dir_path = Path(str(home_path), ".minecraft")
+                minecraft_dir_path = Path(home_path, ".minecraft")
         else:
-            minecraft_dir_path = Path(str(home_path), ".minecraft")
+            minecraft_dir_path = Path(home_path, ".minecraft")
         return minecraft_dir_path
 
-    def _get_installer(self, url: str) -> None:
-        response = self._request("GET", url)
+    def _get_installer(self, endpoint: str) -> None:
+        response = self.get(endpoint)
         try:
             with zipfile.ZipFile(io.BytesIO(response.content), "r") as zip_ref:
                 for file_name in zip_ref.namelist():
@@ -230,6 +223,7 @@ class Installer(BaseClientModel):
         for processor in install_profile["processors"]:
             if self._static_data["SIDE"] not in processor.get("sides", ["client"]):
                 continue
+
             jar_path = str(
                 Path(
                     self._static_data["ROOT"],
@@ -237,7 +231,9 @@ class Installer(BaseClientModel):
                     resolve_maven_coord(processor["jar"]),
                 )
             )
+
             main_class = get_main_class(jar_path)
+
             class_paths = []
             for class_coord in processor.get("classpath"):
                 class_path = str(
@@ -248,16 +244,27 @@ class Installer(BaseClientModel):
                     )
                 )
                 class_paths.append(class_path)
+            if jar_path not in class_paths:
+                class_paths.insert(0, jar_path)
             args = []
             for arg in processor["args"]:
                 arg = self._replace_arg_variable(arg)
                 args.append(arg)
+
+            outputs = {}
+            if processor.get("outputs") is not None:
+                for key, value in processor.get("outputs").items():
+                    outputs[self._replace_arg_variable(key)] = (
+                        self._replace_arg_variable(value)
+                    )
+
             processors.append(
                 {
                     "jar": jar_path,
                     "main_class": main_class,
                     "class_paths": class_paths,
                     "args": args,
+                    "outputs": outputs,
                 }
             )
         return processors
@@ -271,8 +278,8 @@ class Installer(BaseClientModel):
         ) -> bool:
             main_class = processor.get("main_class")
             class_paths = processor.get("class_paths")
-
             args = processor["args"]
+            outputs = processor.get("outputs")
 
             temp_files = []
             for i, arg in enumerate(args):
@@ -300,6 +307,9 @@ class Installer(BaseClientModel):
                     text=True,
                 )
                 print(result.stdout)
+                if not outputs:
+                    for file_path, hash_value in outputs.keys():
+                        self._hash_verify(file_path, hash_value, "sha1")
                 return True
             except subprocess.CalledProcessError as e:
                 print(f"Fail to patch, Return Code: {e.returncode}")
@@ -371,8 +381,11 @@ class Installer(BaseClientModel):
 
     def check_and_download_minecraft_jar(self, block_size: int = 8192) -> bool:
         if os.path.exists(self._static_data["MINECRAFT_JAR"]) is False:
+            manifest = requests.request(
+                "GET", "https://launchermeta.mojang.com/mc/game/version_manifest.json"
+            ).json()
             target_version = None
-            for version_info in self._minecraft_manifest["versions"]:
+            for version_info in manifest["versions"]:
                 if version_info["id"] == self._static_data["MINECRAFT_VERSION"]:
                     target_version = version_info
                     break

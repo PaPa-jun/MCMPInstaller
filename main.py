@@ -1,7 +1,7 @@
 import json
 from configparser import ConfigParser
 from src.client import CurseforgeClient
-from src.loaders import FabricInstaller, NeoForgeInstaller
+from src.loaders import FabricInstaller, NeoForgeInstaller, ForgeInstaller
 
 
 configs = ConfigParser()
@@ -14,6 +14,10 @@ cli = CurseforgeClient(
 )
 
 loader = NeoForgeInstaller()
+# results = cli.get_minecraft_loaders("1.12.2", include_all=True)
 
-# cli.download_modpacks(925200, "/mnt/g/Minecraft/ATM10", "complete")
-loader.install("1.21.1", "21.1.219", ".minecraft/")
+# for result in results:
+#     print(result.name)
+
+success = loader.install("1.20.2", "20.2.3-beta", ".minecraft")
+print(success)
