@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Optional, Any, Dict, List, Tuple, Union
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from .utils import get_main_class, resolve_maven_coord
+from .utils import get_main_class, resolve_maven_coord, get_minecraft_dir_path
 
 
 class BaseClientModel:
@@ -153,28 +153,6 @@ class BaseInstaller(BaseClientModel):
         self.installer = {}
         self._static_data = {}
         self._pattern = re.compile(r"(\{[A-Z_]+\})|(\[[^\]]+\])")
-
-    def _get_minecraft_dir_path(self) -> str:
-        home_path = Path.home()
-        if os.name == "nt":
-            appdata = os.getenv("APPDATA")
-            minecraft_dir_path = (
-                Path(appdata, ".minecraft")
-                if appdata
-                else Path(home_path, ".minecraft")
-            )
-        elif os.name == "posix":
-            if os.path.exists(
-                Path(home_path, "Library", "Application Support", "minecraft")
-            ):
-                minecraft_dir_path = Path(
-                    home_path, "Library", "Application Support", "minecraft"
-                )
-            else:
-                minecraft_dir_path = Path(home_path, ".minecraft")
-        else:
-            minecraft_dir_path = Path(home_path, ".minecraft")
-        return minecraft_dir_path
 
     def _get_installer(self, endpoint: str) -> None:
         response = self.get(endpoint)
@@ -341,7 +319,7 @@ class BaseInstaller(BaseClientModel):
     ) -> None:
         self._static_data["SIDE"] = install_side
         self._static_data["ROOT"] = (
-            install_path if install_path else self._get_minecraft_dir_path()
+            install_path if install_path else get_minecraft_dir_path()
         )
         self._static_data["MINECRAFT_VERSION"] = minecraft_version
         self._static_data["LOADER_NAME"] = loader_name
@@ -368,7 +346,7 @@ class BaseInstaller(BaseClientModel):
             )
         )
         data["id"] = (
-            f"{self._static_data["LOADER_NAME"]}-{self._static_data["LOADER_VERSION"]}.json"
+            f"{self._static_data["LOADER_NAME"]}-{self._static_data["LOADER_VERSION"]}"
         )
         try:
             os.makedirs(file_path, exist_ok=True)

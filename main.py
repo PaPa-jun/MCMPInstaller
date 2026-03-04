@@ -1,23 +1,10 @@
-import json
 from configparser import ConfigParser
-from src.client import CurseforgeClient
-from src.loaders import FabricInstaller, NeoForgeInstaller, ForgeInstaller
+from cursecraft import CurseCraft
 
 
 configs = ConfigParser()
 configs.read("cfg.ini")
 
-cli = CurseforgeClient(
-    configs.get("DEFAULT", "API_KEY"),
-    configs.get("DEFAULT", "BASE_URL"),
-    configs.get("DEFAULT", "GAME_ID"),
-)
+craft = CurseCraft(configs)
 
-loader = NeoForgeInstaller()
-# results = cli.get_minecraft_loaders("1.12.2", include_all=True)
-
-# for result in results:
-#     print(result.name)
-
-success = loader.install("1.20.2", "20.2.3-beta", ".minecraft")
-print(success)
+craft.install_modpack(389615, "G:\\Minecraft")

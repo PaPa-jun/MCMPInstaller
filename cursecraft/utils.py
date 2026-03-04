@@ -1,0 +1,102 @@
+import zipfile, os, requests, base64
+from pathlib import Path
+from typing import Optional
+
+
+def unzip_file(
+    zip_path: str, extract_to: str = ".", password: Optional[str] = None
+) -> bool:
+    os.makedirs(extract_to, exist_ok=True)
+
+    with zipfile.ZipFile(zip_path, "r") as zip_ref:
+        pwd_bytes = password.encode("utf-8") if password else None
+        zip_ref.extractall(path=extract_to, pwd=pwd_bytes)
+
+    return True
+
+
+def get_main_class(jar_path: str):
+    with zipfile.ZipFile(jar_path, "r") as zip_ref:
+        for file_name in zip_ref.namelist():
+            if file_name == "META-INF/MANIFEST.MF":
+                manifest_content = zip_ref.read(file_name).decode("utf-8")
+                break
+    for line in manifest_content.splitlines():
+        if line.startswith("Main-Class:"):
+            return line.split(":", 1)[1].strip()
+    return None
+
+
+def resolve_maven_coord(coord: str) -> str:
+    extension = "jar"
+    if "@" in coord:
+        coord_body, extension = coord.rsplit("@", 1)
+        if "@" in coord_body:
+            raise ValueError(f"Invalid maven coord: {coord}")
+        parts = coord_body.split(":")
+    else:
+        parts = coord.split(":")
+
+    if len(parts) < 3:
+        raise ValueError(f"Invalid maven coord: {coord}")
+
+    group = parts[0]
+    artifact = parts[1]
+    version = parts[2]
+    classifier = parts[3] if len(parts) > 3 else None
+
+    if classifier and "@" in classifier:
+        classifier, extension = classifier.split("@", 1)
+    group_path = group.replace(".", "/")
+    filename = f"{artifact}-{version}"
+
+    if classifier:
+        filename += f"-{classifier}"
+    filename += f".{extension}"
+    return f"{group_path}/{artifact}/{version}/{filename}"
+
+
+def get_minecraft_dir_path() -> str:
+    home_path = Path.home()
+    if os.name == "nt":
+        appdata = os.getenv("APPDATA")
+        minecraft_dir_path = (
+            Path(appdata, ".minecraft") if appdata else Path(home_path, ".minecraft")
+        )
+    elif os.name == "posix":
+        if os.path.exists(
+            Path(home_path, "Library", "Application Support", "minecraft")
+        ):
+            minecraft_dir_path = Path(
+                home_path, "Library", "Application Support", "minecraft"
+            )
+        else:
+            minecraft_dir_path = Path(home_path, ".minecraft")
+    else:
+        minecraft_dir_path = Path(home_path, ".minecraft")
+    return minecraft_dir_path
+
+
+def get_image_base64(image_url: str) -> str:
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    }
+    response = requests.get(image_url, headers=headers, timeout=10)
+    response.raise_for_status()
+    content_type = response.headers.get("Content-Type", "")
+
+    if ";" in content_type:
+        content_type = content_type.split(";")[0].strip()
+
+    if not content_type.startswith("image/"):
+        if image_url.lower().endswith(".jpg") or image_url.lower().endswith(".jpeg"):
+            content_type = "image/jpeg"
+        elif image_url.lower().endswith(".webp"):
+            content_type = "image/webp"
+        elif image_url.lower().endswith(".gif"):
+            content_type = "image/gif"
+        else:
+            content_type = "image/png"
+
+    base64_data = base64.b64encode(response.content).decode("utf-8")
+    return f"data:{content_type};base64,{base64_data}"

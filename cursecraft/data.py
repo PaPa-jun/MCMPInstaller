@@ -2,7 +2,6 @@ from typing import Optional, Any, Dict, List
 from dataclasses import dataclass
 from datetime import datetime
 
-
 @dataclass
 class Category:
     id: int

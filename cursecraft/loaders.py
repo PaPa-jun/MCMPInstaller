@@ -64,8 +64,8 @@ class ForgeInstaller(BaseInstaller):
 
 
 class FabricInstaller(BaseInstaller):
-    def __init__(self, api_base_url="https://meta.fabricmc.net", max_workers=5) -> None:
-        super(FabricInstaller, self).__init__(api_base_url, max_workers)
+    def __init__(self, meta_base_url="https://meta.fabricmc.net", max_workers=5) -> None:
+        super(FabricInstaller, self).__init__(meta_base_url, max_workers)
 
     def _get_lib_hash(self, data: Dict[str, Any]) -> Optional[Tuple[str, str]]:
         if data.get("sha1") is not None:
@@ -103,7 +103,7 @@ class FabricInstaller(BaseInstaller):
         grouped_tasks: Dict[str, List[str]] = {}
         for lib in libraries:
             hash_pack = self._get_lib_hash(lib)
-            maven_path = self._resolve_maven_coord(lib.get("name"))
+            maven_path = resolve_maven_coord(lib.get("name"))
             url = lib.get("url") + maven_path
             folder_prefix = str(Path(maven_path).parent)
             file_name = Path(maven_path).name
