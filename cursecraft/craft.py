@@ -7,7 +7,7 @@ from typing import Optional, Dict
 from .loaders import ForgeInstaller, FabricInstaller, NeoForgeInstaller
 from .client import CurseforgeClient
 from .models import BaseInstaller
-from .utils import get_minecraft_dir_path, unzip_file, get_image_base64
+from .utils import get_minecraft_dir_path, unzip_file, get_image_base64, single_download
 
 
 class CurseCraft:
@@ -66,7 +66,7 @@ class CurseCraft:
             modpack.latest_files, key=lambda x: x.file_date, reverse=True
         )[0]
 
-        success = self.client.single_download(
+        success = single_download(
             url=latest_file.download_url,
             file_name=latest_file.file_name,
             dest_path=Path(game_dir, latest_file.display_name),
@@ -91,10 +91,7 @@ class CurseCraft:
 
         modpack_file_ids = [f["fileID"] for f in manifest["files"]]
         success = self.client.download_files(
-            modpack_file_ids,
-            Path(game_dir, latest_file.display_name),
-            self.block_size,
-            enable_classification=True,
+            modpack_file_ids, Path(game_dir, latest_file.display_name), self.block_size
         )
         if not all(success):
             return False

@@ -1,5 +1,4 @@
-import os, json
-from pathlib import Path
+import os
 from typing import Optional, List, Union, Dict
 
 from .models import BaseClientModel
@@ -12,7 +11,7 @@ from .data import (
     ModLoader,
     MinecraftModLoader,
 )
-from .utils import unzip_file
+from .utils import batch_download
 
 
 class CurseforgeClient(BaseClientModel):
@@ -34,7 +33,7 @@ class CurseforgeClient(BaseClientModel):
     ) -> None:
         self._headers = {"Accept": "application/json", "x-api-key": api_key}
         super(CurseforgeClient, self).__init__(headers=self._headers, base_url=base_url)
-        
+
         self._game_id = game_id
         self._mods_class_id = mods_class_id
         self._modpacks_class_id = modpacks_class_id
@@ -514,73 +513,45 @@ class CurseforgeClient(BaseClientModel):
         ).json()
         return MinecraftModLoader.from_dict(response["data"])
 
-    def download_mod_file(
-        self,
-        mod_id: int,
-        file_id: int,
-        dest_path: Optional[str] = None,
-        block_size: int = 8192,
-    ) -> bool:
-        file = self.get_mod_file(mod_id, file_id)
-        return self.single_download(
-            file.download_url,
-            file.file_name,
-            dest_path,
-            block_size,
-            expected_hash=file.hashes[0].value,
-            hash_algo=self._hash_algo[file.hashes[0].algo],
-        )
-
     def download_files(
         self,
         file_ids: List[int],
         dest_path: Optional[str] = None,
         block_size: int = 8192,
-        enable_classification: bool = False,
     ) -> List[bool]:
         files = self.get_files(file_ids)
-        if enable_classification is not True:
-            urls = [
+        mod_ids = list(set([file.mod_id for file in files]))
+        mods = self.get_mods(mod_ids)
+
+        class2folder = {
+            self._mods_class_id: "mods",
+            self._resource_packs_class_id: "resourcepacks",
+            self._shaders_class_id: "shaderpacks",
+            self._worlds_class_id: "saves",
+            self._data_packs_class_id: "datapacks",
+            self._bukkit_plugins_class_id: "plugins",
+            self._modpacks_class_id: "modpacks",
+            self._addons_class_id: "addons",
+            self._customization_class_id: "config",
+        }
+
+        grouped: Dict[str, List[tuple]] = {}
+        id2mod = {mod.id: mod for mod in mods}
+        for file in files:
+            mod = id2mod.get(file.mod_id)
+            folder = class2folder.get(mod.class_id if mod else None, "other")
+            grouped.setdefault(folder, []).append(
                 (
                     file.file_name,
                     file.download_url,
                     file.hashes[0].value,
                     self._hash_algo[file.hashes[0].algo],
                 )
-                for file in files
-            ]
-            return self.batch_download(urls, dest_path, block_size)
-        else:
-            mod_ids = list(set([file.mod_id for file in files]))
-            mods = self.get_mods(mod_ids)
-            class2folder = {
-                self._mods_class_id: "mods",
-                self._resource_packs_class_id: "resourcepacks",
-                self._shaders_class_id: "shaderpacks",
-                self._worlds_class_id: "saves",
-                self._data_packs_class_id: "datapacks",
-                self._bukkit_plugins_class_id: "plugins",
-                self._modpacks_class_id: "modpacks",
-                self._addons_class_id: "addons",
-                self._customization_class_id: "config",
-            }
-            grouped: Dict[str, List[tuple]] = {}
-            id2mod = {mod.id: mod for mod in mods}
-            for file in files:
-                mod = id2mod.get(file.mod_id)
-                folder = class2folder.get(mod.class_id if mod else None, "other")
-                grouped.setdefault(folder, []).append(
-                    (
-                        file.file_name,
-                        file.download_url,
-                        file.hashes[0].value,
-                        self._hash_algo[file.hashes[0].algo],
-                    )
-                )
-            results = []
-            for sub_folder, urls in grouped.items():
-                path = os.path.join(dest_path, sub_folder)
-                os.makedirs(path, exist_ok=True)
-                results.extend(self.batch_download(urls, path, block_size))
-            return results
+            )
 
+        results = []
+        for sub_folder, urls in grouped.items():
+            path = os.path.join(dest_path, sub_folder)
+            os.makedirs(path, exist_ok=True)
+            results.extend(batch_download(urls, path, block_size))
+        return results

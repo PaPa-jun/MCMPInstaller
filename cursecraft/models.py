@@ -1,10 +1,15 @@
-import io, os, re, requests, hashlib, tempfile, subprocess, json, zipfile
+import io, os, re, requests, tempfile, subprocess, json, zipfile
 from tqdm import tqdm
 from pathlib import Path
-from typing import Optional, Any, Dict, List, Tuple, Union
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Optional, Any, Dict, List
 
-from .utils import get_main_class, resolve_maven_coord, get_minecraft_dir_path
+from .utils import (
+    get_main_class,
+    resolve_maven_coord,
+    get_minecraft_dir_path,
+    single_download,
+    hash_verify,
+)
 
 
 class BaseClientModel:
@@ -44,99 +49,6 @@ class BaseClientModel:
     def post(self, endpoint: str, json: Optional[Dict[str, Any]] = None) -> Any:
         url = self._base_url + endpoint
         return self._request("POST", url, json=json)
-
-    def _calculate_file_hash(self, file_path: str, hash_algo: str):
-        hash_func = hashlib.new(hash_algo)
-        with open(file_path, "rb") as f:
-            for chunk in iter(lambda: f.read(8192), b""):
-                hash_func.update(chunk)
-        return hash_func.hexdigest()
-
-    def _hash_verify(self, file_path: str, expected_hash: str, hash_algo: str):
-        expected_hash = expected_hash.lower().strip()
-        file_hash = self._calculate_file_hash(file_path, hash_algo)
-        if file_hash == expected_hash:
-            return True
-        return False
-
-    def single_download(
-        self,
-        url: str,
-        file_name: str,
-        dest_path: Optional[str] = None,
-        block_size: int = 8192,
-        expected_hash: Optional[str] = None,
-        hash_algo: str = "sha256",
-    ) -> bool:
-        if dest_path is None:
-            home_path = Path.home()
-            dest_path = Path(home_path, "Downloads")
-        os.makedirs(dest_path, exist_ok=True)
-        full_path = Path(dest_path, file_name)
-
-        if os.path.exists(full_path):
-            if expected_hash:
-                if self._hash_verify(full_path, expected_hash, hash_algo):
-                    return True
-                os.remove(full_path)
-            else:
-                os.remove(full_path)
-
-        try:
-            with requests.get(url=url, stream=True, headers=self._headers) as request:
-                request.raise_for_status()
-
-                total_size = int(request.headers.get("content-length", 0))
-                with open(full_path, "wb") as f:
-                    with tqdm(
-                        total=total_size, unit="B", unit_scale=True, desc=file_name
-                    ) as pbar:
-                        for chunk in request.iter_content(chunk_size=block_size):
-                            if chunk:
-                                f.write(chunk)
-                                pbar.update(len(chunk))
-            if expected_hash is not None:
-                if not self._hash_verify(full_path, expected_hash, hash_algo):
-                    os.remove(full_path)
-                    return False
-            return True
-        except Exception as e:
-            print(f"Download failed: {file_name}: {e}")
-            if os.path.exists(full_path):
-                os.remove(full_path)
-            return False
-
-    def batch_download(
-        self,
-        files: List[Union[Tuple[str, str], Tuple[str, str, str, str]]],
-        dest_path: Optional[str] = None,
-        block_size: int = 8192,
-    ) -> List[bool]:
-        results = {}
-        with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
-            future2file = {}
-            for item in files:
-                args = (
-                    (item[1], item[0], dest_path, block_size)
-                    if len(item) == 2
-                    else (
-                        (item[1], item[0], dest_path, block_size, item[2], item[3])
-                        if len(item) == 4
-                        else None
-                    )
-                )
-                future2file[executor.submit(self.single_download, *args)] = item[0]
-
-            for future in as_completed(future2file):
-                file_name = future2file[future]
-                try:
-                    success = future.result()
-                    results[file_name] = success
-                except Exception as exc:
-                    print(f"{file_name} 生成异常: {exc}")
-                    results[file_name] = False
-
-        return [results[item[0]] for item in files if item[0] in results]
 
 
 class BaseInstaller(BaseClientModel):
@@ -250,7 +162,7 @@ class BaseInstaller(BaseClientModel):
     def _run_processors(
         self, processors: Dict[str, Any], java_executable: str = "java"
     ) -> List[bool]:
-        def _single_process(
+        def single_process(
             processor: Dict[str, Any],
             java_executable: str = "java",
         ) -> bool:
@@ -287,7 +199,7 @@ class BaseInstaller(BaseClientModel):
                 print(result.stdout)
                 if not outputs:
                     for file_path, hash_value in outputs.keys():
-                        self._hash_verify(file_path, hash_value, "sha1")
+                        hash_verify(file_path, hash_value, "sha1")
                 return True
             except subprocess.CalledProcessError as e:
                 print(f"Fail to patch, Return Code: {e.returncode}")
@@ -306,7 +218,7 @@ class BaseInstaller(BaseClientModel):
 
         results = []
         for processor in processors:
-            results.append(_single_process(processor, java_executable))
+            results.append(single_process(processor, java_executable))
         return results
 
     def _install_initialize(
@@ -368,7 +280,7 @@ class BaseInstaller(BaseClientModel):
                     target_version = version_info
                     break
             version_data = requests.request("GET", target_version["url"]).json()
-            return self.single_download(
+            return single_download(
                 version_data["downloads"]["client"]["url"],
                 f"{self._static_data["MINECRAFT_VERSION"]}.jar",
                 Path(

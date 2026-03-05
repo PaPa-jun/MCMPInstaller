@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Dict, Any, Tuple, Optional, List
 
 from .models import BaseInstaller
-from .utils import resolve_maven_coord
+from .utils import resolve_maven_coord, batch_download
 
 
 class ForgeInstaller(BaseInstaller):
@@ -50,7 +50,7 @@ class ForgeInstaller(BaseInstaller):
         deps_res = []
         for prefix, tasks in grouped_tasks.items():
             path = Path(self._static_data["ROOT"], "libraries", prefix)
-            deps_res.extend(self.batch_download(tasks, path, download_block_size))
+            deps_res.extend(batch_download(tasks, path, download_block_size))
         if not all(deps_res):
             return False
 
@@ -64,7 +64,9 @@ class ForgeInstaller(BaseInstaller):
 
 
 class FabricInstaller(BaseInstaller):
-    def __init__(self, meta_base_url="https://meta.fabricmc.net", max_workers=5) -> None:
+    def __init__(
+        self, meta_base_url="https://meta.fabricmc.net", max_workers=5
+    ) -> None:
         super(FabricInstaller, self).__init__(meta_base_url, max_workers)
 
     def _get_lib_hash(self, data: Dict[str, Any]) -> Optional[Tuple[str, str]]:
@@ -116,7 +118,7 @@ class FabricInstaller(BaseInstaller):
         deps_res = []
         for prefix, tasks in grouped_tasks.items():
             path = Path(self._static_data["ROOT"], "libraries", prefix)
-            deps_res.extend(self.batch_download(tasks, path, download_block_size))
+            deps_res.extend(batch_download(tasks, path, download_block_size))
         if all(deps_res) is not True:
             return False
 
@@ -162,7 +164,7 @@ class NeoForgeInstaller(BaseInstaller):
         deps_res = []
         for prefix, tasks in grouped_tasks.items():
             path = Path(self._static_data["ROOT"], "libraries", prefix)
-            deps_res.extend(self.batch_download(tasks, path, download_block_size))
+            deps_res.extend(batch_download(tasks, path, download_block_size))
         if not all(deps_res):
             return False
 

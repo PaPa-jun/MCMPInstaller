@@ -5,6 +5,6 @@ from cursecraft import CurseCraft
 configs = ConfigParser()
 configs.read("cfg.ini")
 
-craft = CurseCraft(configs)
+craft = CurseCraft(configs, ".minecraft")
 
-craft.install_modpack(389615, "G:\\Minecraft")
+craft.install_modpack(389615, "games")

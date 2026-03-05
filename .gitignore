@@ -14,6 +14,7 @@ wheels/
 *.json
 .minecraft/*
 temp/*
+games/*
 
 # Mac files
 **/.DS_Store
