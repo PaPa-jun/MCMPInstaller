@@ -57,7 +57,9 @@ class CurseCraft:
         self.block_size = configs.getint("UNIVERSAL", "BLOCK_SIZE")
         self.mc_root_dir = mc_root_dir if mc_root_dir else get_minecraft_dir_path()
 
-    def install_modpack(self, mod_id: int, game_dir: Optional[str]):
+    def install_modpack(
+        self, mod_id: int, game_dir: Optional[str] = None, side: str = "client"
+    ):
         if game_dir is None:
             game_dir = Path(Path.home(), "Downloads")
 
@@ -122,7 +124,7 @@ class CurseCraft:
             ).exists()
         ):
             success = self.loader_installer[loader.type].install(
-                mc_version, loader.forge_version, self.mc_root_dir
+                mc_version, loader.forge_version, self.mc_root_dir, side
             )
             if success is False:
                 return False

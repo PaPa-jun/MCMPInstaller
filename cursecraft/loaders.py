@@ -66,12 +66,12 @@ class BaseInstaller:
 
         return self._pattern.sub(replace_match, arg)
 
-    def _parse_install_profile(self, install_profile: Dict[str, Any]):
+    def _parse_install_profile(self, install_profile: Dict[str, Any], side: str):
         for key, values in install_profile["data"].items():
-            self._static_data[key] = self._replace_arg_variable(values["client"])
+            self._static_data[key] = self._replace_arg_variable(values[side])
         processors = []
         for processor in install_profile["processors"]:
-            if self._static_data["SIDE"] not in processor.get("sides", ["client"]):
+            if self._static_data["SIDE"] not in processor.get("sides", [side]):
                 continue
 
             jar_path = str(
@@ -315,7 +315,7 @@ class ForgeInstaller(BaseInstaller):
             return False
 
         self.check_and_download_minecraft_jar()
-        processors = self._parse_install_profile(install_profile)
+        processors = self._parse_install_profile(install_profile, install_side)
         pro_res = self._run_processors(processors)
         if not all(pro_res):
             return False
@@ -433,7 +433,7 @@ class NeoForgeInstaller(BaseInstaller):
             return False
 
         self.check_and_download_minecraft_jar()
-        processors = self._parse_install_profile(install_profile)
+        processors = self._parse_install_profile(install_profile, install_side)
         pro_res = self._run_processors(processors)
         if not all(pro_res):
             return False
